@@ -42,6 +42,7 @@ class RTSPScanner:
         self.creds = self.splitCSV(getenv("RTSP_CREDS","none"))
         self.paths = self.splitCSV(getenv("RTSP_PATHS","/Streaming/Channels/101,/live,live2"))
         self.address = getenv("RTSP_ADDRESS","192.168.2.0/24")
+        self.snapshot_location = ""
         self.cameras = []
             
     def run(self):
@@ -101,8 +102,8 @@ class RTSPScanner:
                         status = f"Checking {rtsp}... "
                         if self.verbose:
                             print(status)
-                        snapshot = f"/tmp/test.png"
-                        thumbnail = f"/tmp/test.webp"
+                        snapshot = f"{self.snapshot_location}/{result['ip']}.png"
+                        thumbnail = f"{self.snapshot_location}/{result['ip']}.webp"
                         command = ['ffmpeg', '-y', '-frames', '1', snapshot, '-rtsp_transport', 'tcp', '-i', rtsp]
                         for x in range(0,self.retries):
                             try:
@@ -249,6 +250,9 @@ if __name__ == "__main__":
         parser.add_argument('-v','--verbose',action='store_true',default=False,
                             help="Set verbosity to true")
         
+        parser.add_argument('-sl','--snapshotlocation', default="/tmp",
+                            help="Location that camera snapshots are stored")
+        
         args = parser.parse_args()
         return args
 
@@ -268,6 +272,7 @@ if __name__ == "__main__":
         scanner.apitransport = args['apitransport']
         scanner.timeout = args['timeout']
         scanner.retries = args['timeoutretries']
+        scanner.snapshot_location = args['snapshotlocation']
         args['mode'] = args['mode'].lower()
         if args['mode'] == "rem" or args['mode'] == "add":
             scanner.mode = args['mode']
