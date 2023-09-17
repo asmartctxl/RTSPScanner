@@ -24,6 +24,8 @@ from os import getenv,path,system
 import subprocess
 import requests
 import json
+import random
+import string
 from PIL import Image
 from portscan import PortScan
     
@@ -44,6 +46,7 @@ class RTSPScanner:
         self.address = getenv("RTSP_ADDRESS","192.168.2.0/24")
         self.snapshot_location = ""
         self.cameras = []
+        self.channels = 8
             
     def run(self):
         self.scanner()
@@ -78,6 +81,20 @@ class RTSPScanner:
         for value in csv.split(','):
             values.append(value)
         return values
+    
+    def getChannels(self, pathObject):
+        path = pathObject["path"]
+        paths = []
+        if "channels" not in pathObject.keys():
+            paths.append(path)
+        else:
+            for i in range(self.channels):
+                if "channels_length" in pathObject.keys():
+                    paths.append(path.replace("{{channel}}", str(i).rjust(pathObject["channels_length"], "0")))
+                else:
+                    paths.append(path.replace("{{channel}}", str(i)))
+        return paths
+        
 
     def scanner(self):
         self.portscan = PortScan(self.address,self.ports,stdout=False)
@@ -95,41 +112,45 @@ class RTSPScanner:
         flaky = []
         for result in results:
             if result:
-                for path in self.paths:
-                    for cred in self.creds:
-                        transport = f"rtsp://{cred}@" if cred != "none" else "rtsp://"
-                        rtsp = f'{transport}{result["ip"]}:{result["port"]}{path}'
-                        status = f"Checking {rtsp}... "
-                        if self.verbose:
-                            print(status)
-                        snapshot = f"{self.snapshot_location}/{result['ip']}.png"
-                        thumbnail = f"{self.snapshot_location}/{result['ip']}.webp"
-                        command = ['ffmpeg', '-y', '-frames', '1', snapshot, '-rtsp_transport', 'tcp', '-i', rtsp]
-                        for x in range(0,self.retries):
-                            try:
-                                cmd = subprocess.run(command,stderr=subprocess.DEVNULL,timeout=self.timeout)
-                                break
-                            except subprocess.TimeoutExpired as e:
-                                if self.verbose:
-                                    label = f"Retry # {x}" if x > 0 else "1st Attempt"
-                                    print(f"{label}: {e}")
-                                timedout = True
-                        if self.verbose:
-                            print(f"Return Code: {cmd.returncode}")
-                        if 'timedout' in locals():
-                            if timedout:
-                                flaky.append([str(result['ip']),rtsp])
-                        if 'cmd' in locals() and cmd.returncode == 0:
-                            self.cameras.append([str(result['ip']),rtsp])
-                            status = "RTSP "
-                            #resizeImg(self,img,output,height=180,ratio=1.777777778,fmt="webp"):
-                            resize = self.resizeImg(snapshot,thumbnail)
-                            if resize == "OK":
-                                status += "VALID IMAGE"
-                            else:
-                                status += "NO IMAGE"
-                        if self.verbose:
-                            print(status)
+                for pathObject in self.paths:                    
+                    #get all channels configured for this pathObject
+                    channels = self.getChannels(pathObject)
+                    for path in channels:
+                        for cred in self.creds:
+                            transport = f"rtsp://{cred}@" if cred != "none" else "rtsp://"
+                            rtsp = f'{transport}{result["ip"]}:{result["port"]}{path}'
+                            status = f"Checking {rtsp}... "
+                            if self.verbose:
+                                print(status)
+                            filename = ''.join(random.choices(string.ascii_uppercase + string.ascii_lowercase, k=10))
+                            snapshot = f"{self.snapshot_location}/{filename}.png"
+                            thumbnail = f"{self.snapshot_location}/{filename}.webp"
+                            command = ['ffmpeg', '-y', '-frames', '1', snapshot, '-rtsp_transport', 'tcp', '-i', rtsp]
+                            for x in range(0,self.retries):
+                                try:
+                                    cmd = subprocess.run(command,stderr=subprocess.DEVNULL,timeout=self.timeout)
+                                    break
+                                except subprocess.TimeoutExpired as e:
+                                    if self.verbose:
+                                        label = f"Retry # {x}" if x > 0 else "1st Attempt"
+                                        print(f"{label}: {e}")
+                                    timedout = True
+                            if self.verbose:
+                                print(f"Return Code: {cmd.returncode}")
+                            if 'timedout' in locals():
+                                status = "TIMEDOUT"
+                                if timedout:
+                                    flaky.append([str(result['ip']), rtsp, status])
+                            if 'cmd' in locals() and cmd.returncode == 0:
+                                #resizeImg(self,img,output,height=180,ratio=1.777777778,fmt="webp"):
+                                resize = self.resizeImg(snapshot,thumbnail)
+                                if resize == "OK":
+                                    status = "VALID_IMAGE"
+                                else:
+                                    status = "NO_IMAGE"
+                                self.cameras.append([str(result['ip']), rtsp, status, filename])
+                            if self.verbose:
+                                print(status)
         self.scanResults = {"cameras":self.cameras,"flaky":flaky,"portscan":results}
 
     def delCameras(self):
